@@ -1,0 +1,4 @@
+# dsh-approval-diff: side-by-side diff panel for pending edit/write approvals.
+- insert:
+    - id: approval-diff
+      name: dsh-approval-diff
