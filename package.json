@@ -1,7 +1,7 @@
 {
   "name": "dsh-approval-diff",
-  "version": "0.17.1",
-  "description": "In-chat approval review: a composer takeover (priority 0) for file-changing approvals — true line diffs with word-level highlights, DISK-sourced context (host route, zero model reads), Split/Unified toggle, one-sided green creates, red deletion reviews — ONE FILE PER CARD (v0.17): the pending call's CONTIGUOUS same-file run merges into one diff with two file-scoped buttons, and cross-file or non-contiguous calls get their own card at their own turn, so nothing shown can ever be a phantom or stranded behind an unrelated decision. Doomed requests (missing/ambiguous operands, write-basis staleness) stay invisible and auto-forwarded. Everything else falls through to the native card.",
+  "version": "0.19.2",
+  "description": "In-chat approval review: when the model asks to change a file, a composer takeover replaces the native approval card with a true diff review — line diffs with word-level highlights, disk-sourced context with line numbers, one-sided green creates, red deletion reviews. One file per card (consecutive same-file calls merge into one diff with two file-scoped buttons); everything that is not a file-changing approval falls through to the native card.",
   "type": "module",
   "license": "MIT",
   "main": "lib/index.js",
@@ -23,8 +23,5 @@
       "platform": "web",
       "inject": []
     }
-  },
-  "dependencies": {
-    "@deepseek-ai/cordis": "link:/home/ecila/dev/deepseek-harness/vendor/cordis"
   }
 }

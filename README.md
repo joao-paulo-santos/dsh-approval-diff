@@ -36,11 +36,15 @@ exactly two buttons.
 
 ## How to install
 
-Requires a DeepSeek Harness checkout and a profile (here `web`):
+Requires a DeepSeek Harness checkout and a profile, here `web`. Clone the
+plugin into a plugins folder:
 
 ```sh
+mkdir -p ~/dsh-plugins && cd ~/dsh-plugins
+git clone https://github.com/joao-paulo-santos/dsh-approval-diff.git
+
 # from the harness checkout
-pnpm dsh plugin --profile web add /path/to/dsh-approval-diff
+pnpm dsh plugin --profile web add ~/dsh-plugins/dsh-approval-diff
 
 # verify the profile still composes
 pnpm dsh --profile web --dump-config
@@ -66,3 +70,11 @@ doom detection, dismissal and fallthrough.
 - Deletion review reads targets from disk; glob targets render as the
   pattern.
 - One approval at a time, matching the native card's behavior.
+
+## Dependencies
+
+None
+
+## Plugins dependent on this
+
+*(none yet)*
