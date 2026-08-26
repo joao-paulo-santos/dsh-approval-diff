@@ -12,6 +12,8 @@ exactly two buttons.
 
 ## Plugin value proposition
 
+<img width="1931" height="909" alt="image" src="https://github.com/user-attachments/assets/dcd8fc25-db70-4cb4-9ce2-9d7ffb11cfa6" />
+
 | alternative | falls short |
 |---|---|
 | the native approval card | raw tool arguments; you reconstruct the diff in your head, every ask |
