@@ -53,16 +53,6 @@ pnpm dsh --profile web --dump-config
 Restart the harness after installing: the host half loads at boot. The
 client half hot-reloads once installed.
 
-## Tests
-
-```sh
-node test/client.test.mjs
-```
-
-47 checks: host route contract, chain selection, diff rendering (split and
-unified), context dedup, per-file scoping, run merging and queued delivery,
-doom detection, dismissal and fallthrough.
-
 ## Limitations
 
 - File-changing approvals only (`edit`, `write`, deletion-only `bash`).
