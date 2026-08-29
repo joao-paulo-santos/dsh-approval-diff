@@ -18,6 +18,10 @@ import { fileURLToPath } from 'node:url'
 
 const CLIENT_BUNDLE_PATH = pathResolve(pathDirname(fileURLToPath(import.meta.url)), '../lib/client.js')
 const HOST_ENTRY_PATH = pathResolve(pathDirname(fileURLToPath(import.meta.url)), '../lib/index.js')
+const DIFF_VIEW_BUNDLE_PATH = pathResolve(pathDirname(fileURLToPath(import.meta.url)), '../../dsh-diff-view/lib/client.js')
+
+// The dsh-diff-view service captured when loadClientPlugin activates its bundle.
+let sharedDiffView
 
 // ---------------------------------------------------------------------------
 // The faithful fake context (spec §6 mkCtx, adapted to this plugin's names)
@@ -31,7 +35,7 @@ const mkCtx = (injectList, provided) => {
     provide: (name, api) => { provided[name] = api },
     on: () => () => {},
   }
-  for (const name of ['slots', 'sessions', 'eventRelay']) {
+  for (const name of ['slots', 'sessions', 'eventRelay', 'diffView']) {
     Object.defineProperty(ctx, name, {
       get() {
         if (!declared.has(name)) throw new Error('cannot get property "' + name + '" without inject')
@@ -366,10 +370,20 @@ const cellsWithText = (cells, text) => cells.filter((cell) => textOf(cell) === t
 const loadClientPlugin = (React) => {
   const registrations = []
   globalThis.window = { __ModuleLoader__: { load: (registration) => registrations.push(registration) } }
-  const source = readFileSync(CLIENT_BUNDLE_PATH, 'utf8')
-  ;(0, eval)(source)
-  assert.equal(registrations.length, 1, 'bundle registers exactly one module')
+  ;(0, eval)(readFileSync(CLIENT_BUNDLE_PATH, 'utf8'))
+  ;(0, eval)(readFileSync(DIFF_VIEW_BUNDLE_PATH, 'utf8'))
+  assert.equal(registrations.length, 2, 'approval bundle + dsh-diff-view bundle register')
   assert.equal(registrations[0].id, 'dsh-approval-diff', 'module id is the package name')
+  // Activate dsh-diff-view against a throwaway document: its service is
+  // what the approval panel consumes (real engine, real stylesheet classes).
+  globalThis.document = mkFakeDocument()
+  const diffModule = registrations[1].factory((specifier) => {
+    if (specifier === 'react') return React
+    throw new Error('unexpected require: ' + specifier)
+  })
+  diffModule.apply({ inject: [], provide: (name, api) => { if (name === 'diffView') sharedDiffView = api } })
+  assert.ok(sharedDiffView && typeof sharedDiffView.engine.alignedEditRowsOf === 'function',
+    'dsh-diff-view provides the engine')
   return registrations[0].factory((specifier) => {
     if (specifier === 'react') return React
     throw new Error('unexpected require: ' + specifier)
@@ -502,16 +516,19 @@ const mkRouteExchange = (method, url) => {
 {
   const React = mkMiniReact()
   const plugin = loadClientPlugin(React)
-  assert.deepEqual(plugin.inject, ['slots'], 'declared inject list (slots only — the session kit comes from the seat)')
+  assert.deepEqual(plugin.inject, ['slots', 'diffView'], 'declared inject list (session kit comes from the seat, diffs from dsh-diff-view)')
 
   globalThis.document = mkFakeDocument()
-  const noSlots = mkCtx([], {})
+  const empty = mkCtx([], {})
+  assert.throws(() => plugin.apply(empty), /cannot get property "diffView" without inject/,
+    'ctx.diffView without declaration throws')
+  const noSlots = mkCtx(['diffView'], { diffView: sharedDiffView })
   assert.throws(() => plugin.apply(noSlots), /cannot get property "slots" without inject/,
     'ctx.slots without declaration throws')
-  ok('ctx.slots access throws when not declared in inject')
+  ok('undeclared service access throws (diffView, then slots)')
 
   const slots = mkFakeSlots()
-  const dispose = plugin.apply(mkCtx(plugin.inject, { slots }))
+  const dispose = plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   assert.equal(slots.registrations.length, 1, 'exactly one seat registration')
   const registration = slots.registrations[0]
   assert.equal(registration.options.name, 'conversation.composer', 'registers into the composer chain')
@@ -541,7 +558,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const select = slots.registrations[0].options.select
 
   const editWait = approvalWait('s1', 'a:r1', 'ap1', { toolName: 'edit', callId: 'c1', reason: 'edit app.js' }).wait
@@ -593,7 +610,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
   const select = slots.registrations[0].options.select
 
@@ -727,7 +744,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
 
   const { wait: writeWait } = approvalWait('s1', 'a:w1', 'apw1', { toolName: 'write', callId: 'cw', reason: 'write' })
@@ -752,7 +769,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
 
   // Deletion with disk truth: FULL current content, no staleness caveat.
@@ -795,7 +812,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
 
   // A 14-line file; hunk A edits line 2, hunk B edits line 7 — their context
@@ -918,7 +935,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
   const select = slots.registrations[0].options.select
 
@@ -1046,7 +1063,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
   const select = slots.registrations[0].options.select
 
@@ -1192,7 +1209,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
 
   const bigLines = ['b01', 'b02', 'b03', 'b04', 'b05', 'b06', 'b07', 'b08', 'b09', 'b10']
@@ -1317,7 +1334,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
 
   // 1) STALE CACHE: a SECOND sequential edit to the same file (new approval
@@ -1416,7 +1433,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
 
   const fileLines = ['c01', 'old line', 'c03', 'another old', 'c05', 'c06', 'c07']
@@ -1493,7 +1510,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
 
   const mkTree = async (editArgs, diskContent, observationNodes, keySuffix) => {
@@ -1666,7 +1683,7 @@ const mkRouteExchange = (method, url) => {
   const plugin = loadClientPlugin(React)
   globalThis.document = mkFakeDocument()
   const slots = mkFakeSlots()
-  plugin.apply(mkCtx(plugin.inject, { slots }))
+  plugin.apply(mkCtx(plugin.inject, { slots, diffView: sharedDiffView }))
   const component = slots.registrations[0].component
 
   const fileLines = ['o1', 'o2', 'o3', 'o4', 'o5', 'o6', 'o7', 'o8']

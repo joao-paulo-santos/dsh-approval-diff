@@ -63,7 +63,7 @@ client half hot-reloads once installed.
 
 ## Dependencies
 
-None
+- [dsh-diff-view](https://github.com/joao-paulo-santos/dsh-diff-view) owns the diff engine and stylesheet this plugin renders its review cards with (required; the plugin does not activate without it)
 
 ## Plugins dependent on this
 
