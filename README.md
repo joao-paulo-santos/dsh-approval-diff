@@ -22,17 +22,18 @@ exactly two buttons.
 
 ## What you get
 
-- True line diffs for `edit`: LCS line matching plus word-level highlights;
-  unchanged lines inside an edit's operands render as context, not as changes
-- Split or Unified view (GitHub style toggle, choice remembered); unified
-  groups each change run as all removed lines, then all added
-- New files (`write`) render one-sided, all green; deletions (`rm` and
-  friends) render the full current file in red before you decide
-- Consecutive edits to the same file merge into one diff and one decision
-- Two buttons, Reject and Allow, scoped to exactly what the card shows
-- Requests that cannot succeed are never shown to you
-- Minimize collapses the card without deciding; the close button hands that
-  request back to the native card
+- The pending `edit` rendered as a real diff INSIDE the native approval
+  card, through the card's own `conversation.approval.detail` seat: disk-
+  anchored line numbers, a context window around the change, and word-level
+  highlights (via [dsh-diff-view](https://github.com/joao-paulo-santos/dsh-diff-view))
+- `write` shows the new content as additions, merged against the current
+  file when one exists; deletion commands (`rm` and friends) render a
+  review notice so the command text gets read before allowing
+- The diff is anchored to DISK TRUTH fetched at ask time from this
+  package's host route; when the file cannot be read, the operands still
+  render as an aligned diff with blank numbers — never lying numbers
+- Decisions stay on the native card's own buttons; this plugin never
+  answers anything
 
 ## How to install
 
@@ -56,10 +57,11 @@ client half hot-reloads once installed.
 ## Limitations
 
 - File-changing approvals only (`edit`, `write`, deletion-only `bash`).
-  Everything else is the native card's job.
-- Deletion review reads targets from disk; glob targets render as the
-  pattern.
-- One approval at a time, matching the native card's behavior.
+  Everything else renders no detail and stays fully native.
+- Deletion review shows the command text, not the deleted content.
+- Requires dsh 0.1.2+ (the pending-interaction approval model). The v0.20
+  composer takeover, batch decisions, and per-file answer buttons are
+  retired — the native card owns decisions now.
 
 ## Dependencies
 
