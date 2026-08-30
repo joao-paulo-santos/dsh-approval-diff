@@ -26,14 +26,21 @@ exactly two buttons.
   card, through the card's own `conversation.approval.detail` seat: disk-
   anchored line numbers, a context window around the change, and word-level
   highlights (via [dsh-diff-view](https://github.com/joao-paulo-santos/dsh-diff-view))
+- Split or Unified views (GitHub-style toggle, choice remembered); split
+  pairs removals left with additions right, unified groups each change run
+  as all removed lines then all added
 - `write` shows the new content as additions, merged against the current
   file when one exists; deletion commands (`rm` and friends) render a
   review notice so the command text gets read before allowing
 - The diff is anchored to DISK TRUTH fetched at ask time from this
   package's host route; when the file cannot be read, the operands still
   render as an aligned diff with blank numbers — never lying numbers
-- Decisions stay on the native card's own buttons; this plugin never
-  answers anything
+- Stale-operand warning: when the edit's old text is no longer in the file,
+  the card says so instead of showing a diff that cannot apply
+- ARMING: "Auto-allow edits to this file" answers the current request and
+  every later same-file request for the session (allowed-once only, never
+  wider), with a visible armed state and one-click disarm
+- The decision itself stays on the native card's own buttons
 
 ## How to install
 
@@ -60,8 +67,10 @@ client half hot-reloads once installed.
   Everything else renders no detail and stays fully native.
 - Deletion review shows the command text, not the deleted content.
 - Requires dsh 0.1.2+ (the pending-interaction approval model). The v0.20
-  composer takeover, batch decisions, and per-file answer buttons are
-  retired — the native card owns decisions now.
+  composer takeover and its per-card buttons are retired — the native card
+  owns the chrome and the buttons. Approvals arrive one at a time (the
+  session queues them internally); arming replaces the old batch decision
+  workflow for repeated edits to the same file.
 
 ## Dependencies
 

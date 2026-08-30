@@ -1,6 +1,6 @@
 {
   "name": "dsh-approval-diff",
-  "version": "0.21.1",
+  "version": "0.22.0",
   "description": "In-chat approval review: when the model asks to change a file, a composer takeover replaces the native approval card with a true diff review. Line diffs with word-level highlights, disk-sourced context with line numbers, one-sided green creates, red deletion reviews. One file per card (consecutive same-file calls merge into one diff with two file-scoped buttons); everything that is not a file-changing approval falls through to the native card.",
   "type": "module",
   "license": "MIT",
