@@ -40,7 +40,14 @@ exactly two buttons.
 - ARMING: "Auto-allow edits to this file" answers the current request and
   every later same-file request for the session (allowed-once only, never
   wider), with a visible armed state and one-click disarm
-- The decision itself stays on the native card's own buttons
+- QUEUED SAME-FILE EDITS ARE ONE REVIEW: a conversation view over the
+  `approval/asked` + `approval/decided` events reconstructs the session's
+  approval queue, so when several edits to one file are pending the card
+  shows "+N queued", renders every queued change merged against the disk
+  copy (sequential anchors), and offers Allow all / Reject all — one
+  decision that auto-answers the rest of the group as each becomes effective
+- The decision itself stays on the native card's own buttons (group
+  decisions automate that exact answer, never wider)
 
 ## How to install
 
