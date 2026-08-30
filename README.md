@@ -34,7 +34,7 @@ exactly two buttons.
   review notice so the command text gets read before allowing
 - The diff is anchored to DISK TRUTH fetched at ask time from this
   package's host route; when the file cannot be read, the operands still
-  render as an aligned diff with blank numbers — never lying numbers
+  render as an aligned diff with blank numbers, never lying numbers
 - Stale-operand warning: when the edit's old text is no longer in the file,
   the card says so instead of showing a diff that cannot apply
 - ARMING: "Auto-allow edits to this file" answers the current request and
@@ -67,7 +67,7 @@ client half hot-reloads once installed.
   Everything else renders no detail and stays fully native.
 - Deletion review shows the command text, not the deleted content.
 - Requires dsh 0.1.2+ (the pending-interaction approval model). The v0.20
-  composer takeover and its per-card buttons are retired — the native card
+  composer takeover and its per-card buttons are retired: the native card
   owns the chrome and the buttons. Approvals arrive one at a time (the
   session queues them internally); arming replaces the old batch decision
   workflow for repeated edits to the same file.
