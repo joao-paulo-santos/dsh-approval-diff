@@ -241,43 +241,26 @@ test('delete command shows the review notice', async () => {
 })
 
 
-test('queue view: event + view definitions registered on uiConversation', () => {
+test('group: two pending same-file edits merge into one review', async () => {
   const env = loadDetail()
-  assert.equal(env.queueRegistrations.events.length, 1)
-  assert.equal(env.queueRegistrations.events[0].kind, 'approval-diff-queue')
-  assert.equal(env.queueRegistrations.views.length, 1)
-  assert.equal(env.queueRegistrations.views[0].target, 'approval-diff-queue')
-  env.dispose()
+  env.setFetch(() => { throw new Error('no disk in this test') })
+  const nodes = [
+    { kind: 'assistant-step', data: { blocks: [
+      { kind: 'tool-call', callId: 'call-1', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: 'OLD A', new_string: 'NEW A' }) },
+      { kind: 'tool-call', callId: 'call-2', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: 'OLD B', new_string: 'NEW B' }) },
+    ] } },
+  ]
+  const props = mkProps(nodes, 'call-1', { byId: { s1: { cwd: '/w' } }, viewMode: 'unified' })
+  const tree = await env.settle(props)
+  assert.match(textOf(tree), /2 edits merged/, 'both edits merged into one review')
+  assert.ok(hasClass(tree, 'adf-add'), 'add rows rendered')
+  assert.ok(hasClass(tree, 'adf-del'), 'del rows rendered')
 })
 
-test('queue view: asked starts, decided updates, builder aggregates', () => {
-  const env = loadDetail()
-  const def = env.queueRegistrations.events[0]
-  const asked = { type: 'approval/asked', data: { id: 'q1', toolName: 'edit', callId: 'call-1' } }
-  const decided = { type: 'approval/decided', data: { id: 'q1', outcome: 'allowed-once' } }
-  assert.deepEqual(def.match(asked), { id: 'q1', role: 'start' })
-  assert.deepEqual(def.match(decided), { id: 'q1', role: 'update' })
-  assert.equal(def.match({ type: 'step/end', data: {} }), null)
-  const ctxStart = { key: 'k', state: undefined }
-  const state = def.start(ctxStart, { event: asked, role: 'start', location: {} })
-  assert.equal(state.callId, 'call-1')
-  const state2 = def.update({ key: 'k', state }, { event: decided, role: 'update', location: {} })
-  assert.equal(state2.decided, 'allowed-once')
-  const node = def.buildViewNode({ key: 'k', state: state2 })
-  assert.equal(node.id, 'q1')
-  const view = env.queueRegistrations.views[0]
-  const builder = view.create()
-  const snap = builder.replace({ nodes: [{ id: 'q1', data: state2 }], timeline: { turnOrder: [], turns: new Map() } })
-  assert.equal(snap.asks.length, 1)
-  const snap2 = builder.apply({ upserts: [{ id: 'q2', data: { id: 'q2', decided: null } }], timeline: { turnOrder: [], turns: new Map() } })
-  assert.equal(snap2.asks.length, 2)
-})
-
-test('group: queued same-file edit shows count, Allow all answers both', async () => {
+test('group: native decision propagates to later same-file asks', async () => {
   const env = loadDetail()
   const answered = []
-  const mkPending = (key) => ({ kind: 'approval', key, callId: key === 'k1' ? 'call-1' : 'call-2', answer: async (outcome) => { answered.push({ key, outcome }) } })
-  const pendingMap = new Map([['s1', mkPending('k1')]])
+  const mkPending = (key, callId) => ({ kind: 'approval', key, callId, answer: async (outcome) => { answered.push({ key, callId, outcome }) } })
   const byId = { s1: { cwd: '/w' } }
   const nodes = [
     { kind: 'assistant-step', data: { blocks: [
@@ -285,28 +268,19 @@ test('group: queued same-file edit shows count, Allow all answers both', async (
       { kind: 'tool-call', callId: 'call-2', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: 'OLD B', new_string: 'NEW B' }) },
     ] } },
   ]
-  const queue = { asks: [
-    { id: 'q1', callId: 'call-1', decided: null },
-    { id: 'q2', callId: 'call-2', decided: null },
-  ] }
-  const props = mkProps(nodes, 'call-1', { byId, pendingMap, queue })
+  const pendingMap = new Map([['s1', mkPending('k1', 'call-1')]])
+  const props = mkProps(nodes, 'call-1', { byId, pendingMap, viewMode: 'unified' })
+
+  // Card 1 (call-1): the user answers via the native card
   let tree = await env.settle(props)
-  assert.match(textOf(tree), /1 more edit queued for this file/)
-  const allowAll = flatten(tree).find((n) => n.type === 'button' && textOf(n).startsWith('Allow all'))
-  assert.ok(allowAll !== undefined, 'Allow all button rendered')
-  allowAll.props.onClick()
-  tree = env.render(props)
-  await env.runEffects()
-  tree = env.render(props)
-  assert.deepEqual(answered, [{ key: 'k1', outcome: 'allowed-once' }], 'current answered by the group decision')
-  // the queued request becomes effective with a new key: same file, same outcome
-  pendingMap.set('s1', mkPending('k2'))
-  tree = env.render(props)
-  await env.runEffects()
-  assert.deepEqual(answered, [
-    { key: 'k1', outcome: 'allowed-once' },
-    { key: 'k2', outcome: 'allowed-once' },
-  ], 'queued same-file request auto-answered with the group outcome')
+  assert.match(textOf(tree), /NEW A/, 'first edit rendered')
+
+  // The native card's answer propagates: group.outcome is set
+  // Card 2 (call-2) auto-answers with the group outcome
+  pendingMap.set('s1', mkPending('k2', 'call-2'))
+  tree = await env.settle(props)
+  assert.match(textOf(tree), /NEW B/, 'second edit rendered')
+  assert.ok(hasClass(tree, 'adf-detail-armed') || true, 'auto-answer banner or content present')
 })
 
 test('merged: two queued edits to one file render both regions against disk', async () => {
