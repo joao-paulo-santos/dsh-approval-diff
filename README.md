@@ -44,7 +44,7 @@ exactly two buttons.
   the same file that the model has already emitted joins one merged review.
   The card shows "N edits merged", the grid renders all changes merged
   against the disk copy (sequential anchors), and the native card's answer
-  applies to the whole group — later same-file asks auto-answer with the
+  applies to the whole group. Later same-file asks auto-answer with the
   outcome the user already saw
 - The decision itself stays on the native card's own buttons (group
   decisions automate that exact answer, never wider)
