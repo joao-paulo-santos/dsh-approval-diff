@@ -419,3 +419,50 @@ test('cross-session isolation: two sessions editing the same path never share a 
   assert.deepEqual(answered, [], 'no decision leaked across sessions')
   env.restoreFetch()
 })
+
+test('multi-file volley: tabs per file, per-file merge, pre-decision replays in order', async () => {
+  const env = loadDetail()
+  env.setFetch(() => { throw new Error('no disk in this test') })
+  const nodes = [{
+    kind: 'assistant-step',
+    data: { blocks: [
+      { kind: 'tool-call', callId: 'a1', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: 'OLD A1', new_string: 'NEW A1' }) },
+      { kind: 'tool-call', callId: 'a2', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: 'OLD A2', new_string: 'NEW A2' }) },
+      { kind: 'tool-call', callId: 'b1', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/b.md', old_string: 'OLD B', new_string: 'NEW B' }) },
+    ] },
+  }]
+  const propsOf = (callId, pendingInteraction) => mkProps(nodes, callId, { byId: { s1: { cwd: '/w' } }, pendingInteraction, viewMode: 'unified' })
+
+  // Card 1 surfaces a.md's first ask: tabs for both files, a.md active with
+  // its two edits merged, b.md untouched.
+  let tree = await env.settle(propsOf('a1'))
+  const tabs = flatten(tree).filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('adf-tab'))
+  assert.deepEqual(tabs.map(textOf).sort(), ['a.md', 'b.md'], 'one tab per pending file')
+  assert.match(textOf(tree), /2 edits merged/, 'active file merges only its own calls')
+  assert.ok(textOf(tree).includes('NEW A1') && textOf(tree).includes('NEW A2'), 'a.md edits rendered')
+  assert.ok(!textOf(tree).includes('NEW B'), 'b.md not rendered while inactive')
+
+  // Switch to b.md: its own single edit, plus a stored-decision bar.
+  tabs.find((n) => textOf(n) === 'b.md').props.onClick()
+  tree = env.render(propsOf('a1'))
+  assert.ok(!textOf(tree).includes('2 edits merged'), 'b.md has one edit, no merged badge')
+  assert.ok(textOf(tree).includes('NEW B'), 'b.md edit rendered after switching')
+  const allow = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Allow once')
+  assert.ok(allow !== undefined, 'pre-decision bar offers a stored approval')
+
+  // Store the approval; the tab reports it.
+  allow.props.onClick()
+  tree = env.render(propsOf('a1'))
+  assert.ok(textOf(tree).includes('b.md · approved'), 'tab shows the stored decision')
+
+  // When b.md's own ask surfaces later, the stored decision answers it
+  // without the user.
+  const answered = []
+  const bPending = {
+    kind: 'approval', key: 'kb', callId: 'b1', result: new Promise(() => {}),
+    answer: async (outcome) => { answered.push(outcome) },
+  }
+  await env.settle(propsOf('b1', bPending))
+  assert.deepEqual(answered, ['allowed-once'], 'pre-decision replayed when the ask surfaces')
+  env.restoreFetch()
+})

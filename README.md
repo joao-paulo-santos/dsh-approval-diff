@@ -46,6 +46,10 @@ exactly two buttons.
   against the disk copy (sequential anchors), and the native card's answer
   applies to the whole group. Later same-file asks auto-answer with the
   outcome the user already saw
+- MULTI-FILE REQUESTS GET TABS: when one message touches several files, the
+  card shows one tab per pending file, each with its own merged diff. Files
+  that are not up yet can be decided out of order: the decision is stored
+  and replays automatically when the scheduler reaches that file's ask
 - The decision itself stays on the native card's own buttons (group
   decisions automate that exact answer, never wider)
 
