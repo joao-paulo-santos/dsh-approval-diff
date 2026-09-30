@@ -117,17 +117,17 @@ const loadDetail = () => {
 }
 
 const withCallId = (nodes, callId) => { nodes.callId = callId; return nodes }
-const mkProps = (chatNodes, callId, { byId = {}, pendingInteraction = undefined, queue = { asks: [] }, viewMode } = {}) => ({
+const mkProps = (chatNodes, callId, { byId = {}, pendingInteraction = undefined, queue = { asks: [] }, viewMode, sessionId = 's1' } = {}) => ({
   callId,
   viewMode,
   bumpQueue: () => {},
   useConversation: (sel) => sel({ views: { get: (t) => (t === 'chat' ? { nodes: { values: () => chatNodes } } : (t === 'approval-diff-queue' ? queue : undefined)) } }),
   useSessions: (sel) => sel({ byId }),
-  useSession: (sel) => sel({ sessionId: 's1' }),
+  useSession: (sel) => sel({ sessionId }),
   // REAL contract: a global-standard hook whose snapshot carries the pending
   // interaction per session. (The old fake fed a useSessionPendingInteraction
   // hook that exists nowhere in the harness — the phantom-passing failure.)
-  useSessionStatus: (sel) => sel(new Map([['s1', { pendingInteraction }]])),
+  useSessionStatus: (sel) => sel(new Map([[sessionId, { pendingInteraction }]])),
 })
 const editNodes = (callId, oldString, newString) => withCallId([{
   kind: 'assistant-step',
@@ -384,5 +384,38 @@ test('merged regression: a size-changing first edit keeps later edits at true di
   const delLines = flatten(tree).filter((n) => typeof n.props?.className === 'string' && n.props.className.includes('ddv-row-del'))
   assert.deepEqual(delLines.map((n) => textOf(n.children[0])), ['2', '7'], 'both dels at their true disk numbers')
   assert.deepEqual(delLines.map((n) => textOf(n.children[3])), ['X', 'Y'])
+  env.restoreFetch()
+})
+
+test('cross-session isolation: two sessions editing the same path never share a group', async () => {
+  const env = loadDetail()
+  env.setFetch(() => { throw new Error('no disk in this test') })
+  // Session 1 has a pending edit to /w/a.md; its interaction resolves rejected.
+  let resolveS1
+  const s1Pending = { kind: 'approval', key: 's1k', callId: 's1-call' }
+  s1Pending.result = new Promise((resolve) => { resolveS1 = resolve })
+  const s1Nodes = editNodes('s1-call', 'OLD ONE', 'NEW ONE')
+  const s1Props = mkProps(s1Nodes, 's1-call', { byId: { s1: { cwd: '/w' } }, pendingInteraction: s1Pending, viewMode: 'unified' })
+  await env.settle(s1Props)
+  resolveS1('rejected')
+  await env.runEffects()
+
+  // Session 2, same file path, its own chat and pending ask. Its result is
+  // UNRESOLVED: live, result only settles after someone answers, so a
+  // resolved-here result would (correctly) count as an already-made decision.
+  const answered = []
+  const s2Pending = {
+    kind: 'approval', key: 's2k', callId: 's2-call', result: new Promise(() => {}),
+    answer: async (outcome) => { answered.push(outcome) },
+  }
+  const s2Nodes = editNodes('s2-call', 'OLD TWO', 'NEW TWO')
+  const s2Props = mkProps(s2Nodes, 's2-call', { byId: { s2: { cwd: '/w' } }, pendingInteraction: s2Pending, sessionId: 's2', viewMode: 'unified' })
+  const tree = await env.settle(s2Props)
+  const texts = flatten(tree).map(textOf)
+  assert.ok(!texts.some((t) => t.includes('NEW ONE')), "session 2's card must not absorb session 1's edit")
+  assert.ok(!texts.some((t) => t.includes('2 edits merged')), 'no cross-session merged count')
+  assert.ok(texts.some((t) => t.includes('NEW TWO')), 'session 2 renders its own edit')
+  // Session 1's rejected outcome must not auto-answer session 2's ask.
+  assert.deepEqual(answered, [], 'no decision leaked across sessions')
   env.restoreFetch()
 })
