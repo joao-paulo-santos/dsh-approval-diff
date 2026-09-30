@@ -268,19 +268,75 @@ test('group: native decision propagates to later same-file asks', async () => {
       { kind: 'tool-call', callId: 'call-2', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: 'OLD B', new_string: 'NEW B' }) },
     ] } },
   ]
-  const pendingMap = new Map([['s1', mkPending('k1', 'call-1')]])
-  const props = mkProps(nodes, 'call-1', { byId, pendingMap, viewMode: 'unified' })
 
-  // Card 1 (call-1): the user answers via the native card
-  let tree = await env.settle(props)
+  // Card 1 (call-1): the pending interaction carries the native card's
+  // answer as a RESULT PROMISE that resolves after the user clicks.
+  let resolveK1
+  const k1 = mkPending('k1', 'call-1')
+  k1.result = new Promise((resolve) => { resolveK1 = resolve })
+  const pendingMap = new Map([['s1', k1]])
+  let tree = await env.settle(mkProps(nodes, 'call-1', { byId, pendingMap, viewMode: 'unified' }))
   assert.match(textOf(tree), /NEW A/, 'first edit rendered')
 
-  // The native card's answer propagates: group.outcome is set
-  // Card 2 (call-2) auto-answers with the group outcome
-  pendingMap.set('s1', mkPending('k2', 'call-2'))
-  tree = await env.settle(props)
+  // THE LIVE FAILURE ORDER (the "asked 3 times" bug): the next ask SURFACES
+  // before ask 1's result resolves — the detail has already moved on when
+  // the outcome lands. The capture must survive that transition.
+  const k2 = mkPending('k2', 'call-2')
+  pendingMap.set('s1', k2)
+  resolveK1('rejected')
+  tree = await env.settle(mkProps(nodes, 'call-2', { byId, pendingMap, viewMode: 'unified' }))
   assert.match(textOf(tree), /NEW B/, 'second edit rendered')
-  assert.ok(hasClass(tree, 'adf-detail-armed') || true, 'auto-answer banner or content present')
+  assert.deepEqual(answered, [{ key: 'k2', callId: 'call-2', outcome: 'rejected' }],
+    'ask 2 auto-answered with the outcome the user already chose — ONE decision total')
+
+  // Ask 3 of the same group: same propagation, still no new user decision.
+  const k3 = mkPending('k3', undefined)
+  pendingMap.set('s1', k3)
+  await env.settle(mkProps(nodes, 'call-2', { byId, pendingMap, viewMode: 'unified' }))
+  assert.deepEqual(answered.map((a) => a.outcome), ['rejected', 'rejected'],
+    'ask 3 also auto-answered (a 3-edit volley costs the user exactly ONE decision)')
+})
+
+test('split regression: class names never render as text (context rows carry the line)', async () => {
+  const env = loadDetail()
+  env.setFetch(() => ({ ok: true, json: async () => ({ path: '/w/a.md', content: ['l1', 'l2', 'l3', 'OLD A', 'l5', 'l6'].join('\n'), truncated: false }) }))
+  let tree = await env.settle(mkProps(editNodes('call-5', 'OLD A', 'NEW A'), 'call-5', { byId: { s1: { cwd: '/w' } } }))
+  const toggle = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Split')
+  toggle.props.onClick()
+  tree = env.render(mkProps(editNodes('call-5', 'OLD A', 'NEW A'), 'call-5', { byId: { s1: { cwd: '/w' } } }))
+  // No cell anywhere renders a literal class name (the 7-arg push bug).
+  const texts = flatten(tree).map(textOf)
+  assert.ok(!texts.includes('adf-ctx') && !texts.includes('adf-add') && !texts.includes('adf-del'),
+    'class names must be classNames, never cell text')
+  // Context lines: a real disk line inside ±3 of the change renders as CELL
+  // CONTENT on BOTH sides (previously the text landed in the number column).
+  const ctxLeft = flatten(tree).find((n) => typeof n.props?.className === 'string'
+    && n.props.className.split(' ').includes('adf-ctx') && n.props.style?.gridColumn === '2' && textOf(n) === 'l3')
+  const ctxRight = flatten(tree).find((n) => typeof n.props?.className === 'string'
+    && n.props.className.split(' ').includes('adf-ctx') && n.props.style?.gridColumn === '4' && textOf(n) === 'l3')
+  assert.ok(ctxLeft !== undefined, 'left context cell carries the real line')
+  assert.ok(ctxRight !== undefined, 'right context cell carries the real line')
+  const ctxNums = flatten(tree)
+    .filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('adf-num'))
+    .map(textOf)
+  assert.ok(ctxNums.every((t) => t === '' || /^\d+$/.test(t)), 'number columns carry only numbers')
+  env.restoreFetch()
+})
+
+test('split regression (no disk): operand rows never render class names as text', async () => {
+  const env = loadDetail()
+  env.setFetch(() => { throw new Error('no disk in this test') })
+  let tree = await env.settle(mkProps(editNodes('call-1', 'same\nOLD\nsame', 'same\nNEW\nsame'), 'call-1', { viewMode: undefined }))
+  const toggle = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Split')
+  toggle.props.onClick()
+  tree = env.render(mkProps(editNodes('call-1', 'same\nOLD\nsame', 'same\nNEW\nsame'), 'call-1', { viewMode: undefined }))
+  const texts = flatten(tree).map(textOf)
+  assert.ok(!texts.includes('adf-ctx') && !texts.includes('adf-add') && !texts.includes('adf-del') && !texts.includes('adf-pad'),
+    'unanchored split rows: class names never render as text')
+  assert.ok(texts.includes('same'), 'unchanged operand line renders as content')
+  assert.ok(texts.some((t) => t.includes('OLD')), 'removed operand line renders as content')
+  assert.ok(texts.some((t) => t.includes('NEW')), 'added operand line renders as content')
+  env.restoreFetch()
 })
 
 test('merged: two queued edits to one file render both regions against disk', async () => {
