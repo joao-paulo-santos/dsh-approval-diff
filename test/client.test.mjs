@@ -438,19 +438,23 @@ test('multi-file volley: per-tab decisions; nothing settles until every file is 
   // tab (no ordering language anywhere).
   let tree = await env.settle(propsOf('a1'))
   const tabsOf = (t) => flatten(t).filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('adf-tab'))
-  assert.deepEqual(tabsOf(tree).map(textOf).sort(), ['a.md', 'b.md'], 'one tab per pending file')
+  const tabOf = (t, name) => tabsOf(t).find((n) => textOf(n) === name)
+  assert.deepEqual(tabsOf(tree).map(textOf).sort(), ['a.md!', 'b.md!'], 'one tab per pending file, undecided ones badged')
+  assert.equal(flatten(tree).filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('adf-tab-wait')).length, 2, 'waiting badges on undecided tabs')
   assert.match(textOf(tree), /2 edits merged/, 'active file merges only its own calls')
   assert.ok(textOf(tree).includes('NEW A1') && textOf(tree).includes('NEW A2'), 'a.md edits rendered')
   assert.ok(!textOf(tree).includes('NEW B'), 'b.md not rendered while inactive')
   assert.ok(textOf(tree).includes('Applies once every file is decided.'), 'the only note states the gate, not an order')
 
-  // Decide b.md first (out of order); the tab reports it.
-  tabsOf(tree).find((n) => textOf(n) === 'b.md').props.onClick()
+  // Decide b.md first (out of order); the tab reports it and the review
+  // auto-advances to the next undecided file.
+  tabOf(tree, 'b.md!').props.onClick()
   tree = env.render(propsOf('a1'))
   assert.ok(textOf(tree).includes('NEW B'), 'b.md edit rendered after switching')
   flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Allow once').props.onClick()
   tree = env.render(propsOf('a1'))
   assert.ok(textOf(tree).includes('b.md · approved'), 'tab shows the stored decision')
+  assert.equal(tabOf(tree, 'a.md!').props['aria-selected'], 'true', 'deciding advances to the next undecided tab')
 
   // a.md still undecided: NOTHING settles, even when b.md's ask surfaces.
   const answered = []
@@ -468,7 +472,7 @@ test('multi-file volley: per-tab decisions; nothing settles until every file is 
     answer: async (outcome) => { answered.push({ key: 'ka', outcome }) },
   }
   tree = await env.settle(propsOf('a1', aPending))
-  tabsOf(tree).find((n) => textOf(n) === 'a.md').props.onClick()
+  tabOf(tree, 'a.md!').props.onClick()
   tree = env.render(propsOf('a1', aPending))
   flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Allow once').props.onClick()
   await env.settle(propsOf('a1', aPending))
