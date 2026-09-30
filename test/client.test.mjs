@@ -198,39 +198,22 @@ test('split: both sides carry numbers, pairs word-highlighted', async () => {
   assert.ok(hasClass(tree, 'ddv-w-del') || hasClass(tree, 'ddv-w-add'), 'word highlights present')
 })
 
-test('arming: answers the current request allowed-once and later same-file requests', async () => {
+test('single-file pick: the decide bar answers the ask; no auto-answer without a pick', async () => {
   const env = loadDetail()
   const answered = []
-  const mkPending = (key) => ({ kind: 'approval', key, callId: 'call-1', answer: async (outcome) => { answered.push({ key, outcome }) } })
+  const mkPending = (key) => ({ kind: 'approval', key, callId: 'call-1', result: new Promise(() => {}), answer: async (outcome) => { answered.push({ key, outcome }) } })
   const byId = { s1: { cwd: '/w' } }
   const nodes = editNodes('call-1', 'const a = 1;', 'const b = 2;')
 
   let current = mkPending('k1')
   const props = () => mkProps(nodes, 'call-1', { byId, pendingInteraction: current })
   let tree = await env.settle(props())
-  const armButton = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Auto-allow edits to this file')
-  assert.ok(armButton !== undefined, 'arm control rendered')
-  armButton.props.onClick()                      // the user arms the file
-  tree = env.render(props())                     // re-render records the effect
+  assert.deepEqual(answered, [], 'nothing settles without a pick')
+  flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Allow once').props.onClick()
+  tree = env.render(props())
   await env.runEffects()
-  assert.deepEqual(answered, [{ key: 'k1', outcome: 'allowed-once' }], 'current request auto-answered')
-
-  // a LATER same-file request (new key) is auto-answered without the user
-  current = mkPending('k2')
-  tree = await env.settle(props())
-  assert.deepEqual(answered, [
-    { key: 'k1', outcome: 'allowed-once' },
-    { key: 'k2', outcome: 'allowed-once' },
-  ], 'sequential same-file request auto-answered (armed)')
-  assert.ok(hasClass(tree, 'adf-detail-armed'), 'armed state visible')
-
-  // disarm stops the automation
-  const disarm = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'disarm')
-  disarm.props.onClick()
-  current = mkPending('k3')
-  tree = await env.settle(props())
-  assert.equal(answered.length, 2, 'disarmed: no further auto-answers')
-  assert.ok(!hasClass(tree, 'adf-detail-armed'), 'armed banner gone')
+  assert.deepEqual(answered, [{ key: 'k1', outcome: 'allowed-once' }], 'the pick answers the ask')
+  assert.ok(textOf(tree).includes('Approved'), 'the decided state is visible')
 })
 
 test('stale operand warns instead of lying', async () => {
@@ -446,15 +429,15 @@ test('multi-file volley: per-tab decisions; nothing settles until every file is 
   assert.ok(!textOf(tree).includes('NEW B'), 'b.md not rendered while inactive')
   assert.ok(textOf(tree).includes('Applies once every file is decided.'), 'the only note states the gate, not an order')
 
-  // Decide b.md first (out of order); the tab reports it. The view STAYS on
-  // the decided tab (no auto-advance).
+  // Decide b.md first (out of order); the tab reports it and the review
+  // auto-advances to the next file needing a pick.
   tabOf(tree, 'b.md').props.onClick()
   tree = env.render(propsOf('a1'))
   assert.ok(textOf(tree).includes('NEW B'), 'b.md edit rendered after switching')
   flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Allow once').props.onClick()
   tree = env.render(propsOf('a1'))
   assert.ok(textOf(tree).includes('b.md · approved'), 'tab shows the stored decision')
-  assert.equal(tabsOf(tree).find((n) => textOf(n).startsWith('b.md')).props['aria-selected'], 'true', 'the view stays on the decided tab')
+  assert.equal(tabsOf(tree).find((n) => textOf(n) === 'a.md').props['aria-selected'], 'true', 'deciding advances to the next tab needing a pick')
 
   // a.md still undecided: NOTHING settles, even when b.md's ask surfaces.
   const answered = []
@@ -485,8 +468,9 @@ test('multi-file volley: per-tab decisions; nothing settles until every file is 
   env.restoreFetch()
 })
 
-test('REGRESSION: an armed file never completes the pick gate; one pick settles nothing else', async () => {
-  // b.md was armed at some point (localStorage persists across restarts).
+test('REGRESSION: one pick settles only its own file; a stray stored arm state is inert', async () => {
+  // A leftover "armed" entry in storage (from any earlier experiment) must
+  // have no effect: arming no longer exists.
   globalThis.localStorage = {
     getItem: () => JSON.stringify({ '/w/b.md': 'allowed-once' }),
     setItem: () => {},
@@ -513,20 +497,27 @@ test('REGRESSION: an armed file never completes the pick gate; one pick settles 
   }
   const propsOf = (callId, pendingInteraction) => mkProps(nodes, callId, { byId: { s1: { cwd: '/w' } }, pendingInteraction, viewMode: 'unified' })
 
-  // b.md is ARMED and the tab says so openly, before any click.
+  // No tab is marked armed: stored arm state is dead weight.
   let tree = await env.settle(propsOf('a1', aPending))
-  assert.ok(textOf(tree).includes('b.md · armed'), 'armed state is visible on the tab')
+  assert.ok(!textOf(tree).includes('armed'), 'no armed state anywhere')
 
-  // ONE pick on a.md: only a.md's ask settles now; b.md's ask follows when
-  // it surfaces, from its own armed state. The view stays on a.md (no
-  // auto-advance).
+  // ONE pick on a.md: nothing settles, b.md has no pick.
   flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Allow once').props.onClick()
   await env.settle(propsOf('a1', aPending))
-  assert.deepEqual(answered, [{ key: 'ka', outcome: 'allowed-once' }], 'one pick settles only the picked file')
+  await env.settle(propsOf('b1', bPending))
+  assert.deepEqual(answered, [], 'one pick settles nothing while another file is unpicked')
+
+  // Pick b.md too: each ask settles with its own file's pick.
+  tree = env.render(propsOf('a1', aPending))
+  const tabsOf = (t) => flatten(t).filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('adf-tab'))
+  tabsOf(tree).find((n) => textOf(n).startsWith('b.md')).props.onClick()
+  tree = env.render(propsOf('a1', aPending))
+  flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Allow once').props.onClick()
+  await env.settle(propsOf('a1', aPending))
   await env.settle(propsOf('b1', bPending))
   assert.deepEqual(answered, [
     { key: 'ka', outcome: 'allowed-once' },
     { key: 'kb', outcome: 'allowed-once' },
-  ], 'the armed file answers its own ask when it surfaces')
+  ], 'each ask settles from its own file\'s pick')
   env.restoreFetch()
 })

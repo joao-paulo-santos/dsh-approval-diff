@@ -37,9 +37,6 @@ exactly two buttons.
   render as an aligned diff with blank numbers, never lying numbers
 - Stale-operand warning: when the edit's old text is no longer in the file,
   the card says so instead of showing a diff that cannot apply
-- ARMING: "Auto-allow edits to this file" answers the current request and
-  every later same-file request for the session (allowed-once only, never
-  wider), with a visible armed state and one-click disarm
 - QUEUED SAME-FILE EDITS ARE ONE REVIEW: every pending (unsettled) edit to
   the same file that the model has already emitted joins one merged review.
   The card shows "N edits merged", the grid renders all changes merged
