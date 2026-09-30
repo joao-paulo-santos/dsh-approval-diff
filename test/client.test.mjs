@@ -134,11 +134,10 @@ const editNodes = (callId, oldString, newString) => withCallId([{
   data: { blocks: [{ kind: 'tool-call', callId, name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: oldString, new_string: newString }) }] },
 }], callId)
 
-const numsOf = (tree, side) => flatten(tree)
-  .filter((n) => typeof n.props?.className === 'string' && n.props.className.includes('adf-num')
-    && n.props.style?.gridColumn === (side === 'left' ? '1' : '3'))
-  .map(textOf)
 const hasClass = (tree, cls) => flatten(tree).some((n) => typeof n.props?.className === 'string' && n.props.className.includes(cls))
+const cellTexts = (tree, cls) => flatten(tree)
+  .filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes(cls))
+  .map(textOf)
 
 test('registers the conversation.approval.detail seat at priority -1; dispose unregisters', () => {
   const env = loadDetail()
@@ -153,21 +152,35 @@ test('unified: edit renders dels/adds with blank numbers when disk is unavailabl
   const env = loadDetail()
   env.setFetch(() => { throw new Error('no disk in this test') })
   const tree = await env.settle(mkProps(editNodes('call-1', 'const a = 1;', 'const b = 2;'), 'call-1', { viewMode: 'unified' }))
-  assert.ok(hasClass(tree, 'adf-del') && hasClass(tree, 'adf-add'), 'change rows rendered')
-  const nums = numsOf(tree, 'left')
-  assert.ok(nums.every((t) => t === ''), 'blank numbers in the fallback')
+  assert.ok(hasClass(tree, 'ddv-row-del') && hasClass(tree, 'ddv-row-add'), 'change rows rendered')
+  const nums = flatten(tree)
+    .filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('ddv-num'))
+    .map(textOf)
+  assert.ok(nums.length > 0)
+  assert.ok(nums.every((t) => t === ''), 'blank numbers in the fallback (never lying numbers)')
   assert.ok(hasClass(tree, 'adf-viewtoggle'), 'split/unified toggle present')
   env.restoreFetch()
 })
 
-test('unified: disk truth anchors numbers, word highlights, collapse window', async () => {
+test('unified: disk truth anchors numbers; leading gap collapses into the hunk header', async () => {
   const env = loadDetail()
   env.setFetch(() => ({ ok: true, json: async () => ({ path: '/w/a.md', content: ['l1', 'l2', 'l3', 'l4', 'l5', 'OLD A', 'OLD B', 'l8', 'l9', 'l10'].join('\n'), truncated: false }) }))
   const tree = await env.settle(mkProps(editNodes('call-9', 'OLD A\nOLD B', 'NEW A\nNEW B'), 'call-9', { byId: { s1: { cwd: '/w' } }, viewMode: 'unified' }))
-  // unified: del rows carry disk numbers, add rows carry new-file numbers
-  const actualNums = numsOf(tree, 'left')
-  assert.deepEqual(actualNums, ['3', '4', '5', '6', '7', '6', '7', '8', '9', '10'])
-  assert.ok(hasClass(tree, 'adf-ellipsis'), 'middle collapsed')
+  // One hunk starting 3 lines above the change: @@ -3,8 +3,8 @@
+  const headers = cellTexts(tree, 'ddv-hunkheader')
+  assert.equal(headers.length, 1)
+  assert.match(headers[0], /-3,8 \+3,8/)
+  // dels carry disk numbers 6,7; adds carry new-file numbers 6,7.
+  const allNums = flatten(tree)
+    .filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('ddv-num'))
+    .map(textOf)
+  assert.deepEqual(allNums.slice(0, 6), ['3', '3', '4', '4', '5', '5'], 'context rows carry old and new disk numbers')
+  const delLines = flatten(tree).filter((n) => typeof n.props?.className === 'string' && n.props.className.includes('ddv-row-del'))
+  const addLines = flatten(tree).filter((n) => typeof n.props?.className === 'string' && n.props.className.includes('ddv-row-add'))
+  assert.deepEqual(delLines.map((n) => textOf(n.children[0])), ['6', '7'], 'del rows numbered from disk')
+  assert.deepEqual(addLines.map((n) => textOf(n.children[1])), ['6', '7'], 'add rows numbered in the new file')
+  assert.deepEqual(delLines.map((n) => textOf(n.children[3])), ['OLD A', 'OLD B'])
+  assert.deepEqual(addLines.map((n) => textOf(n.children[3])), ['NEW A', 'NEW B'])
   env.restoreFetch()
 })
 
@@ -175,15 +188,14 @@ test('split: both sides carry numbers, pairs word-highlighted', async () => {
   const env = loadDetail()
   env.setFetch(() => ({ ok: true, json: async () => ({ path: '/w/a.md', content: ['l1', 'l2', 'l3', 'OLD A', 'NEW B', 'l6'].join('\n'), truncated: false }) }))
   // first render sets the remembered mode; flip to split via the toggle button
-  let tree = await env.settle(mkProps(editNodes('call-5', 'OLD A', 'NEW A\nNEW B'), 'call-5', { byId: { s1: { cwd: '/w' } } }))
+  let tree = await env.settle(mkProps(editNodes('call-5', 'OLD A', 'NEW A\nNEW B'), 'call-5', { byId: { s1: { cwd: '/w' } }, viewMode: 'unified' }))
   const toggle = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Split')
   toggle.props.onClick()
-  tree = env.render(mkProps(editNodes('call-5', 'OLD A', 'NEW A\nNEW B'), 'call-5', { byId: { s1: { cwd: '/w' } } }))
-  assert.ok(hasClass(tree, 'adf-grid-twoside'), 'split grid rendered')
-  const left = numsOf(tree, 'left')
-  const right = numsOf(tree, 'right')
-  assert.equal(left.length, right.length, 'paired rows')
-  assert.ok(hasClass(tree, 'adf-w-del') || hasClass(tree, 'adf-w-add'), 'word highlights present')
+  tree = env.render(mkProps(editNodes('call-5', 'OLD A', 'NEW A\nNEW B'), 'call-5', { byId: { s1: { cwd: '/w' } }, viewMode: 'split' }))
+  assert.ok(hasClass(tree, 'ddv-splitline'), 'split rows rendered')
+  const splitLines = flatten(tree).filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('ddv-splitline'))
+  assert.ok(splitLines.every((n) => n.children.length === 2), 'paired sides')
+  assert.ok(hasClass(tree, 'ddv-w-del') || hasClass(tree, 'ddv-w-add'), 'word highlights present')
 })
 
 test('arming: answers the current request allowed-once and later same-file requests', async () => {
@@ -256,8 +268,8 @@ test('group: two pending same-file edits merge into one review', async () => {
   const props = mkProps(nodes, 'call-1', { byId: { s1: { cwd: '/w' } }, viewMode: 'unified' })
   const tree = await env.settle(props)
   assert.match(textOf(tree), /2 edits merged/, 'both edits merged into one review')
-  assert.ok(hasClass(tree, 'adf-add'), 'add rows rendered')
-  assert.ok(hasClass(tree, 'adf-del'), 'del rows rendered')
+  assert.ok(hasClass(tree, 'ddv-row-add'), 'add rows rendered')
+  assert.ok(hasClass(tree, 'ddv-row-del'), 'del rows rendered')
 })
 
 test('group: native decision propagates to later same-file asks', async () => {
@@ -303,24 +315,19 @@ test('group: native decision propagates to later same-file asks', async () => {
 test('split regression: class names never render as text (context rows carry the line)', async () => {
   const env = loadDetail()
   env.setFetch(() => ({ ok: true, json: async () => ({ path: '/w/a.md', content: ['l1', 'l2', 'l3', 'OLD A', 'l5', 'l6'].join('\n'), truncated: false }) }))
-  let tree = await env.settle(mkProps(editNodes('call-5', 'OLD A', 'NEW A'), 'call-5', { byId: { s1: { cwd: '/w' } } }))
-  const toggle = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Split')
-  toggle.props.onClick()
-  tree = env.render(mkProps(editNodes('call-5', 'OLD A', 'NEW A'), 'call-5', { byId: { s1: { cwd: '/w' } } }))
-  // No cell anywhere renders a literal class name (the 7-arg push bug).
+  const tree = await env.settle(mkProps(editNodes('call-5', 'OLD A', 'NEW A'), 'call-5', { byId: { s1: { cwd: '/w' } }, viewMode: 'split' }))
+  // No cell anywhere renders a literal class name (the old 7-arg push bug).
   const texts = flatten(tree).map(textOf)
-  assert.ok(!texts.includes('adf-ctx') && !texts.includes('adf-add') && !texts.includes('adf-del'),
-    'class names must be classNames, never cell text')
-  // Context lines: a real disk line inside ±3 of the change renders as CELL
+  for (const leaked of ['ddv-ctx', 'ddv-add', 'ddv-del', 'ddv-side-ctx', 'ddv-side-add', 'ddv-side-del', 'ddv-srow-ctx', 'ddv-num', 'ddv-text']) {
+    assert.ok(!texts.includes(leaked), 'class names must be classNames, never cell text: ' + leaked)
+  }
+  // Context lines: a real disk line inside ±3 of the change renders as cell
   // CONTENT on BOTH sides (previously the text landed in the number column).
-  const ctxLeft = flatten(tree).find((n) => typeof n.props?.className === 'string'
-    && n.props.className.split(' ').includes('adf-ctx') && n.props.style?.gridColumn === '2' && textOf(n) === 'l3')
-  const ctxRight = flatten(tree).find((n) => typeof n.props?.className === 'string'
-    && n.props.className.split(' ').includes('adf-ctx') && n.props.style?.gridColumn === '4' && textOf(n) === 'l3')
-  assert.ok(ctxLeft !== undefined, 'left context cell carries the real line')
-  assert.ok(ctxRight !== undefined, 'right context cell carries the real line')
+  const ctxSides = flatten(tree).filter((n) => typeof n.props?.className === 'string'
+    && n.props.className.split(' ').includes('ddv-text') && textOf(n) === 'l3')
+  assert.equal(ctxSides.length, 2, 'left and right context cells carry the real line')
   const ctxNums = flatten(tree)
-    .filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('adf-num'))
+    .filter((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes('ddv-num'))
     .map(textOf)
   assert.ok(ctxNums.every((t) => t === '' || /^\d+$/.test(t)), 'number columns carry only numbers')
   env.restoreFetch()
@@ -329,13 +336,11 @@ test('split regression: class names never render as text (context rows carry the
 test('split regression (no disk): operand rows never render class names as text', async () => {
   const env = loadDetail()
   env.setFetch(() => { throw new Error('no disk in this test') })
-  let tree = await env.settle(mkProps(editNodes('call-1', 'same\nOLD\nsame', 'same\nNEW\nsame'), 'call-1', { viewMode: undefined }))
-  const toggle = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Split')
-  toggle.props.onClick()
-  tree = env.render(mkProps(editNodes('call-1', 'same\nOLD\nsame', 'same\nNEW\nsame'), 'call-1', { viewMode: undefined }))
+  const tree = await env.settle(mkProps(editNodes('call-1', 'same\nOLD\nsame', 'same\nNEW\nsame'), 'call-1', { viewMode: 'split' }))
   const texts = flatten(tree).map(textOf)
-  assert.ok(!texts.includes('adf-ctx') && !texts.includes('adf-add') && !texts.includes('adf-del') && !texts.includes('adf-pad'),
-    'unanchored split rows: class names never render as text')
+  for (const leaked of ['ddv-ctx', 'ddv-add', 'ddv-del', 'ddv-side-add', 'ddv-side-del', 'ddv-srow-add', 'ddv-srow-del', 'ddv-num', 'ddv-text']) {
+    assert.ok(!texts.includes(leaked), 'unanchored split rows: class names never render as text: ' + leaked)
+  }
   assert.ok(texts.includes('same'), 'unchanged operand line renders as content')
   assert.ok(texts.some((t) => t.includes('OLD')), 'removed operand line renders as content')
   assert.ok(texts.some((t) => t.includes('NEW')), 'added operand line renders as content')
@@ -361,4 +366,23 @@ test('merged: two queued edits to one file render both regions against disk', as
   assert.ok(texts.some((t) => t === 'NEW A'), 'first edit rendered')
   assert.ok(texts.some((t) => t === 'NEW B'), 'second edit rendered (merged view)')
   assert.ok(texts.some((t) => t === 'mid'), 'intervening disk line kept as context')
+})
+
+test('merged regression: a size-changing first edit keeps later edits at true disk numbers', async () => {
+  const env = loadDetail()
+  // Disk: X at line 2, Y at line 7. Edit 1 GROWS the file (1 line -> 3);
+  // edit 2's region must still anchor at DISK line 7, not drift.
+  env.setFetch(() => ({ ok: true, json: async () => ({ path: '/w/a.md', content: ['top', 'X', 'mid1', 'mid2', 'mid3', 'mid4', 'Y', 'bottom'].join('\n'), truncated: false }) }))
+  const nodes = [
+    { kind: 'assistant-step', data: { blocks: [
+      { kind: 'tool-call', callId: 'call-1', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: 'X', new_string: 'A1\nA2\nA3' }) },
+      { kind: 'tool-call', callId: 'call-2', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: 'Y', new_string: 'B1' }) },
+    ] } },
+  ]
+  const props = mkProps(nodes, 'call-1', { byId: { s1: { cwd: '/w' } }, viewMode: 'unified' })
+  const tree = await env.settle(props)
+  const delLines = flatten(tree).filter((n) => typeof n.props?.className === 'string' && n.props.className.includes('ddv-row-del'))
+  assert.deepEqual(delLines.map((n) => textOf(n.children[0])), ['2', '7'], 'both dels at their true disk numbers')
+  assert.deepEqual(delLines.map((n) => textOf(n.children[3])), ['X', 'Y'])
+  env.restoreFetch()
 })
