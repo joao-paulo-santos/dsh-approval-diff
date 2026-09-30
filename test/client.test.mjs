@@ -117,14 +117,17 @@ const loadDetail = () => {
 }
 
 const withCallId = (nodes, callId) => { nodes.callId = callId; return nodes }
-const mkProps = (chatNodes, callId, { byId = {}, pendingMap = new Map(), queue = { asks: [] }, viewMode } = {}) => ({
+const mkProps = (chatNodes, callId, { byId = {}, pendingInteraction = undefined, queue = { asks: [] }, viewMode } = {}) => ({
   callId,
   viewMode,
   bumpQueue: () => {},
   useConversation: (sel) => sel({ views: { get: (t) => (t === 'chat' ? { nodes: { values: () => chatNodes } } : (t === 'approval-diff-queue' ? queue : undefined)) } }),
   useSessions: (sel) => sel({ byId }),
   useSession: (sel) => sel({ sessionId: 's1' }),
-  useSessionPendingInteraction: (sel) => sel(pendingMap),
+  // REAL contract: a global-standard hook whose snapshot carries the pending
+  // interaction per session. (The old fake fed a useSessionPendingInteraction
+  // hook that exists nowhere in the harness — the phantom-passing failure.)
+  useSessionStatus: (sel) => sel(new Map([['s1', { pendingInteraction }]])),
 })
 const editNodes = (callId, oldString, newString) => withCallId([{
   kind: 'assistant-step',
@@ -187,11 +190,11 @@ test('arming: answers the current request allowed-once and later same-file reque
   const env = loadDetail()
   const answered = []
   const mkPending = (key) => ({ kind: 'approval', key, callId: 'call-1', answer: async (outcome) => { answered.push({ key, outcome }) } })
-  const pendingMap = new Map([['s1', mkPending('k1')]])
   const byId = { s1: { cwd: '/w' } }
   const nodes = editNodes('call-1', 'const a = 1;', 'const b = 2;')
 
-  const props = () => mkProps(nodes, 'call-1', { byId, pendingMap })
+  let current = mkPending('k1')
+  const props = () => mkProps(nodes, 'call-1', { byId, pendingInteraction: current })
   let tree = await env.settle(props())
   const armButton = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Auto-allow edits to this file')
   assert.ok(armButton !== undefined, 'arm control rendered')
@@ -201,7 +204,7 @@ test('arming: answers the current request allowed-once and later same-file reque
   assert.deepEqual(answered, [{ key: 'k1', outcome: 'allowed-once' }], 'current request auto-answered')
 
   // a LATER same-file request (new key) is auto-answered without the user
-  pendingMap.set('s1', mkPending('k2'))
+  current = mkPending('k2')
   tree = await env.settle(props())
   assert.deepEqual(answered, [
     { key: 'k1', outcome: 'allowed-once' },
@@ -212,7 +215,7 @@ test('arming: answers the current request allowed-once and later same-file reque
   // disarm stops the automation
   const disarm = flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'disarm')
   disarm.props.onClick()
-  pendingMap.set('s1', mkPending('k3'))
+  current = mkPending('k3')
   tree = await env.settle(props())
   assert.equal(answered.length, 2, 'disarmed: no further auto-answers')
   assert.ok(!hasClass(tree, 'adf-detail-armed'), 'armed banner gone')
@@ -274,25 +277,25 @@ test('group: native decision propagates to later same-file asks', async () => {
   let resolveK1
   const k1 = mkPending('k1', 'call-1')
   k1.result = new Promise((resolve) => { resolveK1 = resolve })
-  const pendingMap = new Map([['s1', k1]])
-  let tree = await env.settle(mkProps(nodes, 'call-1', { byId, pendingMap, viewMode: 'unified' }))
+  let current = k1
+  const propsOf = (callId) => mkProps(nodes, callId, { byId, pendingInteraction: current, viewMode: 'unified' })
+  let tree = await env.settle(propsOf('call-1'))
   assert.match(textOf(tree), /NEW A/, 'first edit rendered')
 
   // THE LIVE FAILURE ORDER (the "asked 3 times" bug): the next ask SURFACES
   // before ask 1's result resolves — the detail has already moved on when
   // the outcome lands. The capture must survive that transition.
   const k2 = mkPending('k2', 'call-2')
-  pendingMap.set('s1', k2)
+  current = k2
   resolveK1('rejected')
-  tree = await env.settle(mkProps(nodes, 'call-2', { byId, pendingMap, viewMode: 'unified' }))
+  tree = await env.settle(propsOf('call-2'))
   assert.match(textOf(tree), /NEW B/, 'second edit rendered')
   assert.deepEqual(answered, [{ key: 'k2', callId: 'call-2', outcome: 'rejected' }],
     'ask 2 auto-answered with the outcome the user already chose — ONE decision total')
 
   // Ask 3 of the same group: same propagation, still no new user decision.
-  const k3 = mkPending('k3', undefined)
-  pendingMap.set('s1', k3)
-  await env.settle(mkProps(nodes, 'call-2', { byId, pendingMap, viewMode: 'unified' }))
+  current = mkPending('k3', undefined)
+  await env.settle(propsOf('call-2'))
   assert.deepEqual(answered.map((a) => a.outcome), ['rejected', 'rejected'],
     'ask 3 also auto-answered (a 3-edit volley costs the user exactly ONE decision)')
 })
