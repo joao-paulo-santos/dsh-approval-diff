@@ -446,15 +446,15 @@ test('multi-file volley: per-tab decisions; nothing settles until every file is 
   assert.ok(!textOf(tree).includes('NEW B'), 'b.md not rendered while inactive')
   assert.ok(textOf(tree).includes('Applies once every file is decided.'), 'the only note states the gate, not an order')
 
-  // Decide b.md first (out of order); the tab reports it and the review
-  // auto-advances to the next undecided file.
+  // Decide b.md first (out of order); the tab reports it. The view STAYS on
+  // the decided tab (no auto-advance).
   tabOf(tree, 'b.md').props.onClick()
   tree = env.render(propsOf('a1'))
   assert.ok(textOf(tree).includes('NEW B'), 'b.md edit rendered after switching')
   flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Allow once').props.onClick()
   tree = env.render(propsOf('a1'))
   assert.ok(textOf(tree).includes('b.md · approved'), 'tab shows the stored decision')
-  assert.equal(tabOf(tree, 'a.md').props['aria-selected'], 'true', 'deciding advances to the next undecided tab')
+  assert.equal(tabsOf(tree).find((n) => textOf(n).startsWith('b.md')).props['aria-selected'], 'true', 'the view stays on the decided tab')
 
   // a.md still undecided: NOTHING settles, even when b.md's ask surfaces.
   const answered = []
@@ -482,5 +482,51 @@ test('multi-file volley: per-tab decisions; nothing settles until every file is 
     { key: 'ka', outcome: 'allowed-once' },
     { key: 'kb', outcome: 'allowed-once' },
   ], 'the other file replays its stored decision when its ask surfaces')
+  env.restoreFetch()
+})
+
+test('REGRESSION: an armed file never completes the pick gate; one pick settles nothing else', async () => {
+  // b.md was armed at some point (localStorage persists across restarts).
+  globalThis.localStorage = {
+    getItem: () => JSON.stringify({ '/w/b.md': 'allowed-once' }),
+    setItem: () => {},
+    removeItem: () => {},
+  }
+  const env = loadDetail()
+  delete globalThis.localStorage
+  env.setFetch(() => { throw new Error('no disk in this test') })
+  const nodes = [{
+    kind: 'assistant-step',
+    data: { blocks: [
+      { kind: 'tool-call', callId: 'a1', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/a.md', old_string: 'OLD A', new_string: 'NEW A' }) },
+      { kind: 'tool-call', callId: 'b1', name: 'edit', argsRaw: JSON.stringify({ file_path: '/w/b.md', old_string: 'OLD B', new_string: 'NEW B' }) },
+    ] },
+  }]
+  const answered = []
+  const aPending = {
+    kind: 'approval', key: 'ka', callId: 'a1', result: new Promise(() => {}),
+    answer: async (outcome) => { answered.push({ key: 'ka', outcome }) },
+  }
+  const bPending = {
+    kind: 'approval', key: 'kb', callId: 'b1', result: new Promise(() => {}),
+    answer: async (outcome) => { answered.push({ key: 'kb', outcome }) },
+  }
+  const propsOf = (callId, pendingInteraction) => mkProps(nodes, callId, { byId: { s1: { cwd: '/w' } }, pendingInteraction, viewMode: 'unified' })
+
+  // b.md is ARMED and the tab says so openly, before any click.
+  let tree = await env.settle(propsOf('a1', aPending))
+  assert.ok(textOf(tree).includes('b.md · armed'), 'armed state is visible on the tab')
+
+  // ONE pick on a.md: only a.md's ask settles now; b.md's ask follows when
+  // it surfaces, from its own armed state. The view stays on a.md (no
+  // auto-advance).
+  flatten(tree).find((n) => n.type === 'button' && textOf(n) === 'Allow once').props.onClick()
+  await env.settle(propsOf('a1', aPending))
+  assert.deepEqual(answered, [{ key: 'ka', outcome: 'allowed-once' }], 'one pick settles only the picked file')
+  await env.settle(propsOf('b1', bPending))
+  assert.deepEqual(answered, [
+    { key: 'ka', outcome: 'allowed-once' },
+    { key: 'kb', outcome: 'allowed-once' },
+  ], 'the armed file answers its own ask when it surfaces')
   env.restoreFetch()
 })
