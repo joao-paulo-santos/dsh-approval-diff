@@ -35,6 +35,9 @@ const mkDocument = () => {
 
 const flatten = (node, out = []) => {
   if (node === null || node === undefined || typeof node !== 'object') return out
+  // The diff renders as a function-typed element (its own component boundary
+  // for hook safety); execute it so assertions see inside.
+  if (typeof node.type === 'function') return flatten(node.type({ ...(node.props ?? {}), children: node.children }), out)
   out.push(node)
   for (const child of node.children ?? []) flatten(child, out)
   return out
@@ -42,6 +45,7 @@ const flatten = (node, out = []) => {
 const textOf = (node) => {
   if (node === null || node === undefined) return ''
   if (typeof node !== 'object') return String(node)
+  if (typeof node.type === 'function') return textOf(node.type({ ...(node.props ?? {}), children: node.children }))
   return (node.children ?? []).map(textOf).join('')
 }
 const firstByClass = (node, cls) => flatten(node).find((n) => typeof n.props?.className === 'string' && n.props.className.split(' ').includes(cls))

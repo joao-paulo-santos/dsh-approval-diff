@@ -89,3 +89,5 @@ client half hot-reloads once installed.
 ## Plugins dependent on this
 
 *(none yet)*
+
+<!-- pending-surface test marker (safe to revert) -->
